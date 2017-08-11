@@ -1,70 +1,68 @@
-FROM ubuntu:16.04
+FROM centos:7
 
-# set conatiner like parameters
-ENV DEBIAN_FRONTEND noninteractive
-ENV container docker
+LABEL name="crunchydata/postgres" \
+        vendor="crunchy data" \
+      	PostgresVersion="9.6" \
+      	PostgresFullVersion="9.6.3" \
+        version="7.3" \
+        release="1.5" \
+        build-date="2017-08-01" \
+        url="https://crunchydata.com" \
+        summary="PostgreSQL 9.5/9.6 (PGDG) on a Centos7 base image" \
+        description="Allows multiple deployment methods for PostgreSQL, including basic single master, streaming replication with sync/async replicas, and stateful sets. Includes utilities for Auditing (pgaudit), statement tracking, and Backup / Restore (pgbackrest, pg_basebackup)." \
+        io.k8s.description="postgres container" \
+        io.k8s.display-name="Crunchy postgres container" \
+        io.openshift.expose-services="" \
+        io.openshift.tags="crunchy,database"
 
-# update and install dependency packages
-RUN apt-get update -qq && \
-    apt-get dist-upgrade -y && \
-    apt-get install -y wget
+ENV PGVERSION="9.6" PGDG_REPO="pgdg-centos96-9.6-3.noarch.rpm"
 
-# add postgres and 2ndquandrant repo
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ xenial-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-RUN echo "deb [arch=amd64] http://packages.2ndquadrant.com/pglogical/apt/ xenial-2ndquadrant main" > /etc/apt/sources.list.d/2ndquadrant.list
+RUN rpm -Uvh https://download.postgresql.org/pub/repos/yum/${PGVERSION}/redhat/rhel-7-x86_64/${PGDG_REPO}
 
-# add the postgres and 2ndquandrant key for pglogical extenson
-RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN wget --quiet -O - http://packages.2ndquadrant.com/pglogical/apt/AA7A6805.asc | apt-key add -
+RUN yum -y update && yum -y install epel-release \
+ && yum -y update glibc-common \
+ && yum -y install bind-utils \
+	gettext \
+	hostname \
+	nss_wrapper \
+	openssh-clients \
+	kubernetes-client \
+ 	procps-ng  \
+	rsync \
+ && yum -y clean all
 
-# update to pull in repos and install pglogical
-RUN apt-get update && \
-    apt-get install -y postgresql postgresql-contrib postgresql-9.6-pglogical wget
+RUN yum -y install postgresql96-server postgresql96-contrib postgresql96 \
+	pgaudit_96 \
+	pgbackrest \
+ && yum -y clean all
 
-# Run the rest of the commands as the ``postgres`` user created by the ``postgres-9.6`` package when it was ``apt-get installed``
-USER postgres
+ENV PGROOT="/usr/pgsql-${PGVERSION}"
 
+# add path settings for postgres user
+ADD conf/.bash_profile /var/lib/pgsql/
 
-# Adjust PostgreSQL configuration so that remote connections to the
-# database are possible.
-#RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/9.6/main/pg_hba.conf
+RUN mkdir -p /opt/cpm/bin /opt/cpm/conf /pgdata /pgwal /pgconf /backup /recover /backrestrepo
 
-# And add ``listen_addresses`` to ``/etc/postgresql/9.3/main/postgresql.conf``
-#RUN echo "listen_addresses='*'" >> /etc/postgresql/9.6/main/postgresql.conf
-
-# pglogical needed settings
-#RUN echo "wal_level='logical'" >> /etc/postgresql/9.6/main/postgresql.conf
-#RUN echo "max_worker_processes=10" >> /etc/postgresql/9.6/main/postgresql.conf
-#RUN echo "max_replication_slots=10" >> /etc/postgresql/9.6/main/postgresql.conf
-#RUN echo "max_wal_senders=10" >> /etc/postgresql/9.6/main/postgresql.conf
-#RUN echo "shared_preload_libraries='pglogical'" >> /etc/postgresql/9.6/main/postgresql.conf
-#RUN echo "track_commit_timestamp=on" >> /etc/postgresql/9.6/main/postgresql.conf
+RUN chown -R postgres:postgres /opt/cpm /var/lib/pgsql \
+	/pgdata /pgwal /pgconf /backup /recover /backrestrepo
 
 
-# Create a PostgreSQL role named ``docker`` with ``docker`` as the password and
-# then create a database `docker` owned by the ``docker`` role.
-# Note: here we use ``&&\`` to run commands one after the other - the ``\``
-#       allows the RUN command to span multiple lines.
-# TODO:// move to kubernetes config set to do this job
-#RUN /etc/init.d/postgresql start &&\
-    # add the pglogical extension 
- #   psql --command "CREATE EXTENSION pglogical;" &&\
-    # create a test role and password
-  #  psql --command "CREATE USER test WITH SUPERUSER PASSWORD 'test';" &&\
-    #create database test with role test 
-   # createdb -O test test &&\
-    # create the pglogical master node
-    #psql --command "SELECT pglogical.create_node(node_name :='provider1',dsn:='host=localhost port=5432 dbname=test');" &&\
-    # create replication set named default with all tables in public schema
-    #psql --command "SELECT pglogical.replication_set_add_all_tables('default', ARRAY['public']);" 
+# add volumes to allow override of pg_hba.conf and postgresql.conf
+# add volumes to allow backup of postgres files
+# add volumes to offer a restore feature
+# add volumes to allow storage of postgres WAL segment files
+# add volumes to locate WAL files to recover with
+# volume for pgbackrest to write to
 
-# Expose the PostgreSQL port
+VOLUME /pgconf /pgdata /pgwal \
+  /backup /recover /backrestrepo
+
+# open up the postgres port
 EXPOSE 5432
 
-# Add VOLUMEs to allow backup of config, logs and databases
-VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
+ADD bin/postgres /opt/cpm/bin
+ADD conf/postgres /opt/cpm/conf
 
-# Set the default command to run when starting the container
-CMD ["/tmp/start.sh"]
+USER 26
 
-
+CMD ["/opt/cpm/bin/start.sh"]
