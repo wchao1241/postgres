@@ -63,6 +63,8 @@ EXPOSE 5432
 ADD bin/postgres /opt/cpm/bin
 ADD conf/postgres /opt/cpm/conf
 
+RUN chmod 755 /opt/cpm/bin/start.sh
+
 USER 26
 
 CMD ["/opt/cpm/bin/start.sh"]
