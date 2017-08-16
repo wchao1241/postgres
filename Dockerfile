@@ -56,6 +56,8 @@ RUN chown -R postgres:postgres /opt/cpm /var/lib/pgsql \
 
 VOLUME /pgconf /pgdata /pgwal \
   /backup /recover /backrestrepo
+  
+RUN chmod 777 /pgdata
 
 # open up the postgres port
 EXPOSE 5432
